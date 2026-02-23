@@ -2,8 +2,8 @@
 .env
 *.env.local
 
-# Personal notes
-@personal_understanding/
+# Local notes
+.notes/
 
 # Auto-generated config
 frontend/config.js
