@@ -255,6 +255,4 @@ The single `template.yaml` creates:
 
 ---
 
-## 📜 License
 
-MIT — feel free to fork, extend, and use as a portfolio piece.
