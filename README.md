@@ -4,6 +4,12 @@
 
 A production-grade data engineering project that ingests live stock quotes every 5 minutes, processes them into enriched metrics, and serves them through a sleek real-time dashboard — all deployed with a single command.
 
+## 🔗 Live Demo
+
+🌐 **[View Live Dashboard](http://stock-pulse-dashboard-289064655916.s3-website-us-east-1.amazonaws.com/)**
+
+> **Note:** This is a live AWS deployment. The dashboard may be unavailable if the infrastructure has been taken down to manage costs. If the link doesn't load, you can deploy your own instance in under 5 minutes — see [Deployment](#-deployment) below.
+
 ---
 
 ## 📐 Architecture
