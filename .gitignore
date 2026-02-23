@@ -1,0 +1,26 @@
+# Environment & Secrets
+.env
+*.env.local
+
+# Auto-generated config
+frontend/config.js
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Docker
+.docker/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# OS
+Thumbs.db

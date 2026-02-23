@@ -1,0 +1,406 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Stock Pulse — Real-time stock data pipeline & dashboard
+
+Parameters:
+  FinnhubApiKey:
+    Type: String
+    NoEcho: true
+    Description: Finnhub API key for stock data
+  TrackedSymbols:
+    Type: String
+    Default: "AAPL,GOOGL,MSFT,AMZN,TSLA"
+    Description: Comma-separated list of stock symbols to track
+  IngestionImageUri:
+    Type: String
+    Description: ECR URI for the ingestion Lambda Docker image
+  ApiImageUri:
+    Type: String
+    Description: ECR URI for the API Lambda Docker image
+
+Resources:
+  # ─────────────────────────────────────────────
+  # DynamoDB Table
+  # ─────────────────────────────────────────────
+  StockDataTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: StockPulseData
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: N
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      Tags:
+        - Key: Project
+          Value: StockPulse
+
+  # ─────────────────────────────────────────────
+  # IAM Role — Ingestion Lambda
+  # ─────────────────────────────────────────────
+  IngestionLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: StockPulse-IngestionLambdaRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBWriteAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:BatchWriteItem
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt StockDataTable.Arn
+
+  # ─────────────────────────────────────────────
+  # IAM Role — API Lambda
+  # ─────────────────────────────────────────────
+  ApiLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: StockPulse-ApiLambdaRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBReadAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:BatchGetItem
+                Resource: !GetAtt StockDataTable.Arn
+
+  # ─────────────────────────────────────────────
+  # Ingestion Lambda Function
+  # ─────────────────────────────────────────────
+  IngestionLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: StockPulse-Ingestion
+      PackageType: Image
+      Code:
+        ImageUri: !Ref IngestionImageUri
+      Role: !GetAtt IngestionLambdaRole.Arn
+      MemorySize: 512
+      Timeout: 60
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref StockDataTable
+          FINNHUB_API_KEY: !Ref FinnhubApiKey
+          TRACKED_SYMBOLS: !Ref TrackedSymbols
+      Tags:
+        - Key: Project
+          Value: StockPulse
+
+  # ─────────────────────────────────────────────
+  # API Lambda Function
+  # ─────────────────────────────────────────────
+  ApiLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: StockPulse-Api
+      PackageType: Image
+      Code:
+        ImageUri: !Ref ApiImageUri
+      Role: !GetAtt ApiLambdaRole.Arn
+      MemorySize: 256
+      Timeout: 10
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref StockDataTable
+          TRACKED_SYMBOLS: !Ref TrackedSymbols
+      Tags:
+        - Key: Project
+          Value: StockPulse
+
+  # ─────────────────────────────────────────────
+  # EventBridge Rule — 5-minute schedule
+  # ─────────────────────────────────────────────
+  IngestionScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: StockPulse-IngestionSchedule
+      Description: Trigger stock data ingestion every 5 minutes
+      ScheduleExpression: "rate(5 minutes)"
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt IngestionLambda.Arn
+          Id: IngestionLambdaTarget
+
+  IngestionLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref IngestionLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt IngestionScheduleRule.Arn
+
+  # ─────────────────────────────────────────────
+  # API Gateway (REST)
+  # ─────────────────────────────────────────────
+  StockPulseApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: StockPulse-API
+      Description: REST API for Stock Pulse dashboard
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  # /stocks resource
+  StocksResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref StockPulseApi
+      ParentId: !GetAtt StockPulseApi.RootResourceId
+      PathPart: stocks
+
+  # /stocks/{symbol} resource
+  StockSymbolResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref StockPulseApi
+      ParentId: !Ref StocksResource
+      PathPart: "{symbol}"
+
+  # /stocks/{symbol}/history resource
+  StockHistoryResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref StockPulseApi
+      ParentId: !Ref StockSymbolResource
+      PathPart: history
+
+  # GET /stocks
+  StocksGetMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref StockPulseApi
+      ResourceId: !Ref StocksResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ApiLambda.Arn}/invocations"
+
+  # OPTIONS /stocks (CORS)
+  StocksOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref StockPulseApi
+      ResourceId: !Ref StocksResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # GET /stocks/{symbol}
+  StockSymbolGetMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref StockPulseApi
+      ResourceId: !Ref StockSymbolResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      RequestParameters:
+        method.request.path.symbol: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ApiLambda.Arn}/invocations"
+
+  # OPTIONS /stocks/{symbol} (CORS)
+  StockSymbolOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref StockPulseApi
+      ResourceId: !Ref StockSymbolResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # GET /stocks/{symbol}/history
+  StockHistoryGetMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref StockPulseApi
+      ResourceId: !Ref StockHistoryResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      RequestParameters:
+        method.request.path.symbol: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ApiLambda.Arn}/invocations"
+
+  # OPTIONS /stocks/{symbol}/history (CORS)
+  StockHistoryOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref StockPulseApi
+      ResourceId: !Ref StockHistoryResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # API Gateway Deployment
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - StocksGetMethod
+      - StocksOptionsMethod
+      - StockSymbolGetMethod
+      - StockSymbolOptionsMethod
+      - StockHistoryGetMethod
+      - StockHistoryOptionsMethod
+    Properties:
+      RestApiId: !Ref StockPulseApi
+
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref StockPulseApi
+      DeploymentId: !Ref ApiDeployment
+      StageName: prod
+      Description: Production stage
+
+  # Permission for API Gateway to invoke Lambda
+  ApiLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ApiLambda
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${StockPulseApi}/*"
+
+  # ─────────────────────────────────────────────
+  # S3 Bucket — Frontend Hosting
+  # ─────────────────────────────────────────────
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "stock-pulse-dashboard-${AWS::AccountId}"
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      Tags:
+        - Key: Project
+          Value: StockPulse
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: PublicReadAccess
+            Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource: !Sub "${FrontendBucket.Arn}/*"
+
+
+Outputs:
+  ApiUrl:
+    Description: API Gateway endpoint URL
+    Value: !Sub "https://${StockPulseApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
+
+  DashboardUrl:
+    Description: S3 website URL for the dashboard
+    Value: !GetAtt FrontendBucket.WebsiteURL
+
+  TableName:
+    Description: DynamoDB table name
+    Value: !Ref StockDataTable
+
+  FrontendBucketName:
+    Description: S3 bucket name for frontend files
+    Value: !Ref FrontendBucket
+

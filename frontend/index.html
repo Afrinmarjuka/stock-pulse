@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Pulse — Real-Time Stock Dashboard</title>
+    <meta name="description" content="Live stock market dashboard powered by AWS Lambda, DynamoDB, and EventBridge. Track AAPL, GOOGL, MSFT, AMZN, TSLA in real-time.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- ── Header ──────────────────────────────────── -->
+    <header class="header">
+        <div class="header-left">
+            <div class="logo">
+                <span class="logo-icon">⚡</span>
+                <h1>Stock<span class="accent">Pulse</span></h1>
+            </div>
+            <span class="tagline">Real-Time Market Intelligence</span>
+        </div>
+        <div class="header-right">
+            <div class="live-indicator" id="liveIndicator">
+                <span class="live-dot"></span>
+                <span class="live-text">LIVE</span>
+            </div>
+            <div class="last-updated">
+                <span class="label">Last updated</span>
+                <span class="time" id="lastUpdated">--:--:--</span>
+            </div>
+            <button class="refresh-btn" id="refreshBtn" title="Refresh now">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="23 4 23 10 17 10"></polyline>
+                    <polyline points="1 20 1 14 7 14"></polyline>
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- ── Market Summary Bar ─────────────────────── -->
+    <div class="market-summary" id="marketSummary">
+        <div class="summary-item">
+            <span class="summary-label">Tracked</span>
+            <span class="summary-value" id="trackedCount">—</span>
+        </div>
+        <div class="summary-divider"></div>
+        <div class="summary-item">
+            <span class="summary-label">Bullish</span>
+            <span class="summary-value bullish" id="bullishCount">—</span>
+        </div>
+        <div class="summary-divider"></div>
+        <div class="summary-item">
+            <span class="summary-label">Bearish</span>
+            <span class="summary-value bearish" id="bearishCount">—</span>
+        </div>
+        <div class="summary-divider"></div>
+        <div class="summary-item">
+            <span class="summary-label">Market</span>
+            <span class="summary-value" id="marketStatus">—</span>
+        </div>
+    </div>
+
+    <!-- ── Main Content ───────────────────────────── -->
+    <main class="main">
+        <!-- Loading State -->
+        <div class="loading-overlay" id="loadingOverlay">
+            <div class="loader">
+                <div class="loader-ring"></div>
+                <span>Fetching market data...</span>
+            </div>
+        </div>
+
+        <!-- Error State -->
+        <div class="error-banner" id="errorBanner" style="display: none;">
+            <span class="error-icon">⚠️</span>
+            <span class="error-text" id="errorText">Unable to fetch data</span>
+            <button class="error-dismiss" id="errorDismiss">✕</button>
+        </div>
+
+        <!-- Stock Cards Grid -->
+        <div class="cards-grid" id="cardsGrid">
+            <!-- Cards injected by JS -->
+        </div>
+
+        <!-- Detail Panel (shown on card click) -->
+        <div class="detail-panel" id="detailPanel" style="display: none;">
+            <div class="detail-header">
+                <div class="detail-title">
+                    <button class="back-btn" id="backBtn">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M19 12H5"></path>
+                            <polyline points="12 19 5 12 12 5"></polyline>
+                        </svg>
+                    </button>
+                    <h2 id="detailSymbol">AAPL</h2>
+                    <span class="detail-signal" id="detailSignal">bullish</span>
+                </div>
+                <div class="detail-price-info">
+                    <span class="detail-price" id="detailPrice">$0.00</span>
+                    <span class="detail-change" id="detailChange">+0.00 (0.00%)</span>
+                </div>
+            </div>
+            <div class="detail-charts">
+                <div class="chart-container">
+                    <h3>Price — Last 7 Days</h3>
+                    <canvas id="priceChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <h3>Intraday Range</h3>
+                    <canvas id="rangeChart"></canvas>
+                </div>
+            </div>
+            <div class="detail-metrics" id="detailMetrics">
+                <!-- Metrics injected by JS -->
+            </div>
+        </div>
+    </main>
+
+    <!-- ── Footer ─────────────────────────────────── -->
+    <footer class="footer">
+        <div class="footer-left">
+            <span>Data from <a href="https://finnhub.io" target="_blank" rel="noopener">Finnhub</a></span>
+            <span class="footer-dot">·</span>
+            <span>Refreshes every 60s</span>
+        </div>
+        <div class="footer-right">
+            <span>Built with Lambda · EventBridge · DynamoDB · API Gateway</span>
+        </div>
+    </footer>
+
+    <script src="config.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
